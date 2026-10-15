@@ -11,14 +11,17 @@ the newest file with a line containing `rate_limits`. It parses that line's
 `used_percent` and `resets_at`, with reset times expressed as Unix seconds.
 
 The widget displays `100 - used_percent` as the remaining percentage. It
-formats `resets_at` with the device's local time zone. If no matching event or
-required field is available, the widget shows a waiting state instead.
+formats `resets_at` with the device's local time zone. Once a window's reset
+time has passed, it displays that window as full and labels it `full`. If no
+matching event or required field is available, the widget shows a waiting
+state instead.
 
 ## Dependencies
 
-`jq` parses the event data and `findutils` provides `find`. The command also
-uses `date`, `sort`, `cut`, `grep` and `tail`, which are available in the Arch
-base system. `find -printf` and `date -d` are GNU options available on Arch.
+The widget declares `jq`, `findutils`, `coreutils` and `grep` in its package
+requirements. `jq` parses the event data, `findutils` provides `find`,
+`coreutils` provides `date`, `sort`, `cut` and `tail`, and `grep` searches the
+session files. `find -printf` and `date -d` are GNU options available on Arch.
 
 To reproduce the displayed values, place a JSONL event with the described
 `payload.rate_limits` shape in the session directory. The widget refreshes
