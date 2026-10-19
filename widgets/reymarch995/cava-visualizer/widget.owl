@@ -14,7 +14,7 @@ widget "android-cava-visualizer" {
   let barCount = int(num(settings.bars, 12))
   let sensitivity = int(num(settings.sensitivity, 60))
   let jitteriness = int(num(settings.jitteriness, 23))
-  let saveSettings = """python3 -c '
+  let saveSettings = """
 import json, sys
 from pathlib import Path
 
@@ -34,7 +34,7 @@ for index in range(0, len(args), 4):
 temp = path.with_name(path.name + ".tmp")
 temp.write_text(json.dumps(data) + chr(10))
 temp.replace(path)
-'"""
+"""
 
   component NumberSetting(key, labelText, current, low, high, step = 1) {
     Column {
@@ -43,7 +43,7 @@ temp.replace(path)
         gap: 6
         Button {
           text: "←"
-          onTap: run("${saveSettings} ${sh(key)} ${low} ${high} ${int(current - step)}")
+          onTap: run("python3 -c ${sh(saveSettings)} ${sh(key)} ${int(low)} ${int(high)} ${int(current - step)}")
         }
         Slider {
           value: current
@@ -51,17 +51,17 @@ temp.replace(path)
           max: high
           step: step
           weight: 1
-          onChange: run("${saveSettings} ${sh(key)} ${low} ${high} ${int(value)}")
+          onChange: run("python3 -c ${sh(saveSettings)} ${sh(key)} ${int(low)} ${int(high)} ${int(value)}")
         }
         Button {
           text: "→"
-          onTap: run("${saveSettings} ${sh(key)} ${low} ${high} ${int(current + step)}")
+          onTap: run("python3 -c ${sh(saveSettings)} ${sh(key)} ${int(low)} ${int(high)} ${int(current + step)}")
         }
         Input {
           text: str(current)
           placeholder: "number"
           width: 74
-          onSubmit: run("${saveSettings} ${sh(key)} ${low} ${high} ${sh(trim(value))}")
+          onSubmit: run("python3 -c ${sh(saveSettings)} ${sh(key)} ${int(low)} ${int(high)} ${sh(trim(value))}")
         }
       }
     }
@@ -315,7 +315,7 @@ while not stopping:
       NumberSetting { key: "jitteriness"; labelText: "jitteriness (higher = more)"; current: jitteriness; low: 0; high: 100 }
       Button {
         text: "reset CAVA defaults"
-        onTap: run("${saveSettings} bars 4 64 12 sensitivity 1 200 60 jitteriness 0 100 23")
+        onTap: run("python3 -c ${sh(saveSettings)} bars 4 64 12 sensitivity 1 200 60 jitteriness 0 100 23")
       }
 
       Button { text: "close"; onTap: close() }
