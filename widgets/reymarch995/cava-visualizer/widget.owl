@@ -13,6 +13,59 @@ widget "android-cava-visualizer" {
   let endpoint = settings.endpoint ?? ""
   let barCount = int(num(settings.bars, 12))
   let sensitivity = int(num(settings.sensitivity, 60))
+  let jitteriness = int(num(settings.jitteriness, 23))
+  let saveSettings = """python3 -c '
+import json, sys
+from pathlib import Path
+
+path = Path.home() / ".config/omalauncher/cava-visualizer/settings.json"
+path.parent.mkdir(parents=True, exist_ok=True)
+try:
+    data = json.loads(path.read_text())
+except (OSError, ValueError):
+    data = {}
+
+args = sys.argv[1:]
+for index in range(0, len(args), 4):
+    key, low, high, raw = args[index:index + 4]
+    if raw.lstrip("-").isdigit():
+        data[key] = max(int(low), min(int(high), int(raw)))
+
+temp = path.with_name(path.name + ".tmp")
+temp.write_text(json.dumps(data) + chr(10))
+temp.replace(path)
+'"""
+
+  component NumberSetting(key, labelText, current, low, high, step = 1) {
+    Column {
+      Text { text: labelText; style: label }
+      Row {
+        gap: 6
+        Button {
+          text: "←"
+          onTap: run("${saveSettings} ${sh(key)} ${low} ${high} ${int(current - step)}")
+        }
+        Slider {
+          value: current
+          min: low
+          max: high
+          step: step
+          weight: 1
+          onChange: run("${saveSettings} ${sh(key)} ${low} ${high} ${int(value)}")
+        }
+        Button {
+          text: "→"
+          onTap: run("${saveSettings} ${sh(key)} ${low} ${high} ${int(current + step)}")
+        }
+        Input {
+          text: str(current)
+          placeholder: "number"
+          width: 74
+          onSubmit: run("${saveSettings} ${sh(key)} ${low} ${high} ${sh(trim(value))}")
+        }
+      }
+    }
+  }
 
   // Keep the bridge in this file so a store install needs no helper scripts.
   source frame = stream("""python3 -c '
@@ -74,6 +127,7 @@ while not stopping:
         url = f"http://{authority}:{port}{path}"
         count = max(4, min(64, int(cfg.get("bars", 12))))
         sensitivity = max(1, min(200, int(cfg.get("sensitivity", 60))))
+        jitteriness = max(0, min(100, int(cfg.get("jitteriness", 23))))
     except (ValueError, TypeError):
         print(json.dumps({"ok": False, "bars": [], "scale": 3.0,
                           "message": "check app IP:port"}, separators=(",", ":")), flush=True)
@@ -94,7 +148,7 @@ while not stopping:
             "[general]", f"bars = {count}", "bar_width = 1", "bar_spacing = 0",
             "framerate = 30", "autosens = 0", f"sensitivity = {sensitivity}",
             "[input]", "method = fifo", f"source = {fifo}", "sample_rate = 44100",
-            "sample_bits = 16", "[smoothing]", "noise_reduction = 55", "[output]",
+            "sample_bits = 16", "[smoothing]", f"noise_reduction = {100 - jitteriness}", "[output]",
             "method = raw", "channels = mono", "raw_target = /dev/stdout",
             "data_format = ascii", "ascii_max_range = 1000", "bar_delimiter = 59",
             "frame_delimiter = 10"
@@ -256,26 +310,12 @@ while not stopping:
         }
       }
 
-      Row {
-        Text { text: "bar count"; weight: 1 }
-        Text { text: barCount; width: 48; align: end }
-      }
-      Slider {
-        value: barCount; min: 4; max: 64; step: 1
-        onChange: {
-          run("python3 -c 'import json,sys; from pathlib import Path; p=Path.home()/\".config/omalauncher/cava-visualizer/settings.json\"; p.parent.mkdir(parents=True,exist_ok=True); d=json.loads(p.read_text()) if p.exists() else {}; d[sys.argv[1]]=sys.argv[2]; t=p.with_name(p.name+\".tmp\"); t.write_text(json.dumps(d)+chr(10)); t.replace(p)' bars ${int(value)}")
-        }
-      }
-
-      Row {
-        Text { text: "sensitivity"; weight: 1 }
-        Text { text: sensitivity; width: 48; align: end }
-      }
-      Slider {
-        value: sensitivity; min: 1; max: 200; step: 1
-        onChange: {
-          run("python3 -c 'import json,sys; from pathlib import Path; p=Path.home()/\".config/omalauncher/cava-visualizer/settings.json\"; p.parent.mkdir(parents=True,exist_ok=True); d=json.loads(p.read_text()) if p.exists() else {}; d[sys.argv[1]]=sys.argv[2]; t=p.with_name(p.name+\".tmp\"); t.write_text(json.dumps(d)+chr(10)); t.replace(p)' sensitivity ${int(value)}")
-        }
+      NumberSetting { key: "bars"; labelText: "bar count"; current: barCount; low: 4; high: 64 }
+      NumberSetting { key: "sensitivity"; labelText: "sensitivity"; current: sensitivity; low: 1; high: 200 }
+      NumberSetting { key: "jitteriness"; labelText: "jitteriness (higher = more)"; current: jitteriness; low: 0; high: 100 }
+      Button {
+        text: "reset CAVA defaults"
+        onTap: run("${saveSettings} bars 4 64 12 sensitivity 1 200 60 jitteriness 0 100 23")
       }
 
       Button { text: "close"; onTap: close() }
