@@ -3,7 +3,7 @@ widget "now-playing" {
   minSize: 3x2
   padding: 0
   requires { pacman: [] }
-  meta { description: "What's playing on your phone, from any music or podcast app: album art, track, progress and play, pause and skip. Tap the tile to open the app"; version: "1.4"; license: "MIT"; category: "fun"; owl: 6 }
+  meta { description: "What's playing on your phone, from any music or podcast app: album art, track, progress and play, pause and skip. Tap the tile to open the app"; version: "1.5"; license: "MIT"; category: "fun"; owl: 6 }
 
   // {available, playing, title, artist, album, app, package, position, duration, art}.
   // Android only shares other apps' sessions with notification access; without it, available is false.
@@ -27,14 +27,18 @@ widget "now-playing" {
   state blendStrength = 35 persist
   state widgetBlendStrength = 55 persist
   state titleScrollEnabled = true persist
-  state titleScrollGap = 3 persist
+  state titleRepeatGap = 24 persist
   state placementPage = 0
   state settingsSidePage = 0
 
+  let repeatGap = clamp(titleRepeatGap, 0, 96)
+  let isPlaying = m.playing == true
+  let playbackKnown = m.playing == true || m.playing == false
+  let appName = lower(m.app ?? "")
   let has = m != null && m.title != null
   let allowed = m == null || m.available != false
   let dur = num(m.duration, 0)
-  let elapsed = m.playing == true && positionAnchorAt > 0 && now != null ? max(0, now - positionAnchorAt) : 0
+  let elapsed = isPlaying && positionAnchorAt > 0 && now != null ? max(0, now - positionAnchorAt) : 0
   let pos = dur > 0 ? clamp(positionAnchor + elapsed, 0, dur) : positionAnchor + elapsed
   let narrow = cols != null && cols < 5
   let tight = cols != null && cols < 6
@@ -60,7 +64,7 @@ widget "now-playing" {
         let d = min(width, height)
         if kind == "toggle" {
           circle(cx, cy, d / 2, fill: foreground)
-          if m.playing == true {
+          if isPlaying {
             rect(cx - d * 0.15, cy - d * 0.18, d * 0.11, d * 0.36, radius: d * 0.03, fill: background)
             rect(cx + d * 0.04, cy - d * 0.18, d * 0.11, d * 0.36, radius: d * 0.03, fill: background)
           } else {
@@ -157,14 +161,39 @@ widget "now-playing" {
       align: center
       gap: 6
       if rightAligned { Spacer { weight: 1 } }
-      if m.playing == true || m.playing == false {
-        PlaybackIcon { playing: m.playing == true }
+      if playbackKnown {
+        PlaybackIcon { playing: isPlaying }
       }
       if rightAligned {
-        ShadowText { s: lower(m.app ?? ""); tint: m.playing == true ? accent : muted; maxLines: 1 }
+        ShadowText { s: appName; tint: isPlaying ? accent : muted; maxLines: 1 }
       } else {
-        ShadowText { s: lower(m.app ?? ""); tint: m.playing == true ? accent : muted; maxLines: 1; weight: 1 }
+        ShadowText { s: appName; tint: isPlaying ? accent : muted; maxLines: 1; weight: 1 }
       }
+    }
+  }
+
+  component InlineAppLine() {
+    Row {
+      align: center
+      gap: 6
+      if playbackKnown {
+        PlaybackIcon { playing: isPlaying }
+      }
+      Text {
+        text: appName
+        style: small
+        color: isPlaying ? accent : muted
+        maxLines: 1
+        onTap: media("open")
+      }
+    }
+  }
+
+  component SettingsDivider() {
+    Box {
+      height: 1
+      fill: width
+      background: alpha(muted, 0.2)
     }
   }
 
@@ -264,6 +293,10 @@ widget "now-playing" {
   // Keep short titles still; scroll longer ones inside a clipped row.
   component ScrollingTitle(s) {
     Box {
+      let size = 21
+      // Canvas has no text measurement; estimate once per title or gap change, not per frame.
+      let textWidth = max(len(s) * size * 0.62, size)
+      let cycle = textWidth + repeatGap
       height: 30
       fill: width
       clip: true
@@ -271,12 +304,7 @@ widget "now-playing" {
       Canvas {
         fill: true
         clip(0, 0, width, height) {
-          let size = 21
-          // OWL Canvas does not expose text measurement, so estimate the rendered width.
-          let textWidth = max(len(s) * size * 0.62, size)
           if titleScrollEnabled && textWidth > width {
-            let gap = titleScrollGap
-            let cycle = textWidth + gap
             let x = (cycle - (time * 24) % cycle) % cycle
             text(s, x, height / 2, size: size, align: start, bold: true, color: foreground)
             text(s, x - cycle, height / 2, size: size, align: start, bold: true, color: foreground)
@@ -337,8 +365,8 @@ widget "now-playing" {
           Row {
             align: center
             gap: 8
-            ShadowText { s: m.artist ?? ""; tint: muted; maxLines: 2; isSmall: true; weight: 1 }
-            AppLine { }
+            Text { text: m.artist ?? ""; style: small; color: muted; maxLines: 2; weight: 1; onTap: media("open") }
+            InlineAppLine { }
           }
         } else if appPlacement == "farRight" {
           Row {
@@ -359,8 +387,8 @@ widget "now-playing" {
           Row {
             align: center
             gap: 8
-            ShadowText { s: m.artist ?? ""; tint: muted; maxLines: 1; isSmall: true }
-            AppLine { weight: 1 }
+            Text { text: m.artist ?? ""; style: small; color: muted; maxLines: 1; onTap: media("open") }
+            InlineAppLine { }
           }
         } else if appPlacement == "farRight" {
           Row {
@@ -412,11 +440,11 @@ widget "now-playing" {
 
   Box {
     fill: true
+    let widgetBlend = widgetBlendStrength / 100
     if albumBlendEnabled && m.art != null {
       Image { src: m.art; fit: cover; fill: true; opacity: blendStrength / 100 }
       Canvas {
         fill: true
-        let widgetBlend = widgetBlendStrength / 100
         rect(0, 0, width, height, fill: linear(0, 0, width, 0, [alpha(background, min(1, widgetBlend * 0.4)), alpha(background, min(1, widgetBlend * 0.7)), alpha(background, min(1, widgetBlend))]))
       }
     }
@@ -490,6 +518,7 @@ widget "now-playing" {
           {label: "Hidden", value: "hidden"}
         ]
       }
+      SettingsDivider { }
       Column {
         gap: 6
         Text { text: "Settings button position"; style: body; bold: true }
@@ -504,25 +533,25 @@ widget "now-playing" {
           {label: "Bottom left of album art", value: "artBottomLeft"}
         ]
       }
+      SettingsDivider { }
       Column {
         gap: 6
         Text { text: "Title scrolling"; style: body; bold: true }
-        Text { text: "Scroll long song titles and adjust the space between repeats."; style: small; color: muted }
+        Text { text: "Lower spacing brings the next repeat in sooner, without overlapping the title."; style: small; color: muted }
         Button {
           text: titleScrollEnabled ? "Enabled" : "Disabled"
           onTap: titleScrollEnabled = !titleScrollEnabled
         }
-        Text { text: "Gap between repeats: ${titleScrollGap} dp"; style: small; color: muted }
-        Slider {
-          value: titleScrollGap
-          min: 0
-          max: 24
-          step: 1
-          color: accent
-          track: alpha(muted, 0.2)
-          onChange: titleScrollGap = value
+        Text { text: "Repeat spacing"; style: small; color: muted }
+        Row {
+          gap: 4
+          Button { text: "←"; width: 44; onTap: titleRepeatGap = max(repeatGap - 4, 0) }
+          Slider { value: repeatGap; min: 0; max: 96; step: 4; live: true; weight: 1; color: accent; track: alpha(muted, 0.2); onChange: titleRepeatGap = value }
+          Button { text: "→"; width: 44; onTap: titleRepeatGap = min(repeatGap + 4, 96) }
+          Box { width: 76; padding: 6; border: 1; borderColor: border; radius: 4 * corners; Text { text: "${repeatGap} dp"; style: small; align: center; maxLines: 1 } }
         }
       }
+      SettingsDivider { }
       Column {
         gap: 6
         Text { text: "Album color blend"; style: body; bold: true }
@@ -531,25 +560,21 @@ widget "now-playing" {
           text: albumBlendEnabled ? "Enabled" : "Disabled"
           onTap: albumBlendEnabled = !albumBlendEnabled
         }
-        Text { text: "Album art visibility: ${blendStrength}%"; style: small; color: muted }
-        Slider {
-          value: blendStrength
-          min: 0
-          max: 100
-          step: 5
-          color: accent
-          track: alpha(muted, 0.2)
-          onChange: blendStrength = value
+        Text { text: "Album art visibility"; style: small; color: muted }
+        Row {
+          gap: 4
+          Button { text: "←"; width: 44; onTap: blendStrength = max(blendStrength - 5, 0) }
+          Slider { value: blendStrength; min: 0; max: 100; step: 5; live: true; weight: 1; color: accent; track: alpha(muted, 0.2); onChange: blendStrength = value }
+          Button { text: "→"; width: 44; onTap: blendStrength = min(blendStrength + 5, 100) }
+          Box { width: 64; padding: 6; border: 1; borderColor: border; radius: 4 * corners; Text { text: "${blendStrength}%"; style: small; align: center; maxLines: 1 } }
         }
-        Text { text: "Widget background blend: ${widgetBlendStrength}%"; style: small; color: muted }
-        Slider {
-          value: widgetBlendStrength
-          min: 0
-          max: 200
-          step: 5
-          color: accent
-          track: alpha(muted, 0.2)
-          onChange: widgetBlendStrength = value
+        Text { text: "Widget background blend"; style: small; color: muted }
+        Row {
+          gap: 4
+          Button { text: "←"; width: 44; onTap: widgetBlendStrength = max(widgetBlendStrength - 5, 0) }
+          Slider { value: widgetBlendStrength; min: 0; max: 200; step: 5; live: true; weight: 1; color: accent; track: alpha(muted, 0.2); onChange: widgetBlendStrength = value }
+          Button { text: "→"; width: 44; onTap: widgetBlendStrength = min(widgetBlendStrength + 5, 200) }
+          Box { width: 64; padding: 6; border: 1; borderColor: border; radius: 4 * corners; Text { text: "${widgetBlendStrength}%"; style: small; align: center; maxLines: 1 } }
         }
       }
       Button { text: "Done"; onTap: close() }
