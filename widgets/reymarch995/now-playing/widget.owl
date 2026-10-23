@@ -46,6 +46,8 @@ widget "now-playing-plus" {
   let isPlaying = m.playing == true
   let playbackKnown = m.playing == true || m.playing == false
   let appName = lower(m.app ?? "")
+  // Reserve the complete app label and icon before giving the artist the remaining row.
+  let appLineWidth = len(appName) * 9 + 2 + (playbackKnown ? 20 : 0)
   let has = m != null && m.title != null
   let allowed = m == null || m.available != false
   let dur = max(0, num(m.duration, 0))
@@ -388,8 +390,8 @@ widget "now-playing-plus" {
           Row {
             align: center
             gap: 8
-            ShadowText { s: m.artist ?? ""; tint: trackTextColor; maxLines: 2; isSmall: true; weight: 2; subtle: true }
-            AppLine { rightAligned: true; weight: 1 }
+            ShadowText { s: m.artist ?? ""; tint: trackTextColor; maxLines: 2; isSmall: true; weight: 1; subtle: true }
+            AppLine { rightAligned: true; width: appLineWidth }
           }
         } else {
           ShadowText { s: m.artist ?? ""; tint: trackTextColor; maxLines: 2; isSmall: true; subtle: true }
@@ -405,8 +407,8 @@ widget "now-playing-plus" {
           Row {
             align: center
             gap: 8
-            ShadowText { s: m.artist ?? ""; tint: trackTextColor; maxLines: 1; isSmall: true; weight: 2; subtle: true }
-            AppLine { rightAligned: true; weight: 1 }
+            ShadowText { s: m.artist ?? ""; tint: trackTextColor; maxLines: 1; isSmall: true; weight: 1; subtle: true }
+            AppLine { rightAligned: true; width: appLineWidth }
           }
         } else {
           ShadowText { s: m.artist ?? ""; tint: trackTextColor; maxLines: 1; isSmall: true; subtle: true }
