@@ -46,8 +46,10 @@ widget "now-playing-plus" {
   let isPlaying = m.playing == true
   let playbackKnown = m.playing == true || m.playing == false
   let appName = lower(m.app ?? "")
+  let appIndicator = playbackKnown ? (isPlaying ? "▶ " : "Ⅱ ") : ""
+  let appLabel = appName == "" ? "" : appIndicator + appName
   // Reserve the complete app label and icon before giving the artist the remaining row.
-  let appLineWidth = len(appName) * 9 + 2 + (playbackKnown ? 20 : 0)
+  let appLineWidth = len(appLabel) * 9 + 2
   let has = m != null && m.title != null
   let allowed = m == null || m.available != false
   let dur = max(0, num(m.duration, 0))
@@ -147,14 +149,13 @@ widget "now-playing-plus" {
     }
   }
 
-  component ShadowText(s, tint, maxLines = 1, isSmall = false, isBody = false, bold = false, subtle = false, expand = true) {
+  component ShadowText(s, tint, maxLines = 1, isSmall = false, isBody = false, bold = false, subtle = false, textAlign = "start") {
     let textStyle = isBody ? "body" : isSmall ? "small" : "label"
     Box {
-      fill: expand ? "width" : false
-      width: expand ? null : len(s) * 9 + 2
+      fill: width
       onTap: media("open")
-      Text { text: s; style: textStyle; bold: bold; color: alpha(color0, subtle ? 0.48 : 0.95); maxLines: maxLines; offset: subtle ? [1, 1] : [2, 2] }
-      Text { text: s; style: textStyle; bold: bold; color: tint; maxLines: maxLines }
+      Text { text: s; style: textStyle; align: textAlign; bold: bold; color: alpha(color0, subtle ? 0.48 : 0.95); maxLines: maxLines; offset: subtle ? [1, 1] : [2, 2] }
+      Text { text: s; style: textStyle; align: textAlign; bold: bold; color: tint; maxLines: maxLines }
     }
   }
 
@@ -173,16 +174,14 @@ widget "now-playing-plus" {
 
   // Keep this row static; continuous animation costs battery while the tile is visible.
   component AppLine(rightAligned = false) {
-    Row {
-      align: center
-      gap: 6
-      if rightAligned { Spacer { weight: 1 } }
-      if playbackKnown {
-        PlaybackIcon { playing: isPlaying }
-      }
-      if rightAligned {
-        ShadowText { s: appName; tint: isPlaying ? accent : muted; maxLines: 1; subtle: true; expand: false }
-      } else {
+    if rightAligned {
+      // A single text run keeps the icon beside the name when aligned to the edge.
+      ShadowText { s: appLabel; tint: isPlaying ? accent : muted; maxLines: 1; subtle: true; textAlign: "end" }
+    } else {
+      Row {
+        align: center
+        gap: 6
+        if playbackKnown { PlaybackIcon { playing: isPlaying } }
         ShadowText { s: appName; tint: isPlaying ? accent : muted; maxLines: 1; subtle: true; weight: 1 }
       }
     }
@@ -191,8 +190,7 @@ widget "now-playing-plus" {
   // One text run keeps the app beside the artist, with both shadow layers aligned.
   component InlineArtistLine(maxLines = 1) {
     let artist = m.artist ?? ""
-    let indicator = playbackKnown ? (isPlaying ? "▶ " : "Ⅱ ") : ""
-    let suffix = appName == "" ? "" : "  ${indicator}${appName}"
+    let suffix = appLabel == "" ? "" : "  ${appLabel}"
     Box {
       fill: width
       onTap: media("open")
