@@ -3,7 +3,7 @@ widget "now-playing" {
   minSize: 3x2
   padding: 0
   requires { pacman: [] }
-  meta { description: "What's playing on your phone, from any music or podcast app: album art, track, progress and play, pause and skip. Tap the tile to open the app"; version: "1.3"; license: "MIT"; category: "fun"; owl: 6 }
+  meta { description: "What's playing on your phone, from any music or podcast app: album art, track, progress and play, pause and skip. Tap the tile to open the app"; version: "1.4"; license: "MIT"; category: "fun"; owl: 6 }
 
   // {available, playing, title, artist, album, app, package, position, duration, art}.
   // Android only shares other apps' sessions with notification access; without it, available is false.
@@ -26,6 +26,8 @@ widget "now-playing" {
   state albumBlendEnabled = false persist
   state blendStrength = 35 persist
   state widgetBlendStrength = 55 persist
+  state titleScrollEnabled = true persist
+  state titleScrollGap = 3 persist
   state placementPage = 0
   state settingsSidePage = 0
 
@@ -272,8 +274,8 @@ widget "now-playing" {
           let size = 21
           // OWL Canvas does not expose text measurement, so estimate the rendered width.
           let textWidth = max(len(s) * size * 0.62, size)
-          if textWidth > width {
-            let gap = 3
+          if titleScrollEnabled && textWidth > width {
+            let gap = titleScrollGap
             let cycle = textWidth + gap
             let x = (cycle - (time * 24) % cycle) % cycle
             text(s, x, height / 2, size: size, align: start, bold: true, color: foreground)
@@ -501,6 +503,25 @@ widget "now-playing" {
           {label: "Right of app indicator", value: "right"},
           {label: "Bottom left of album art", value: "artBottomLeft"}
         ]
+      }
+      Column {
+        gap: 6
+        Text { text: "Title scrolling"; style: body; bold: true }
+        Text { text: "Scroll long song titles and adjust the space between repeats."; style: small; color: muted }
+        Button {
+          text: titleScrollEnabled ? "Enabled" : "Disabled"
+          onTap: titleScrollEnabled = !titleScrollEnabled
+        }
+        Text { text: "Gap between repeats: ${titleScrollGap} dp"; style: small; color: muted }
+        Slider {
+          value: titleScrollGap
+          min: 0
+          max: 24
+          step: 1
+          color: accent
+          track: alpha(muted, 0.2)
+          onChange: titleScrollGap = value
+        }
       }
       Column {
         gap: 6
