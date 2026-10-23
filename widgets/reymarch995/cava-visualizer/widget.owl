@@ -1,5 +1,5 @@
 widget "android-cava-visualizer" {
-  meta { owl: 6; description: "Visualize Android internal audio with CAVA via the WiFi Audio Streaming app's HTTP stream"; version: "1.0.1"; license: "MIT"; category: "fun" }
+  meta { owl: 6; description: "Visualize Android internal audio with CAVA via the WiFi Audio Streaming app's HTTP stream"; version: "1.0.2"; license: "MIT"; category: "fun" }
   size: 6x2
   minSize: 3x1
 
@@ -7,8 +7,27 @@ widget "android-cava-visualizer" {
 
   state paused = false persist
   state showGuide = false
+  state addressDraft = ""
+  state editingAddress = false
+  state settingsScreenSeen = false
   source settings = file("~/.config/omalauncher/cava-visualizer/settings.json") json
   let endpoint = settings.endpoint ?? ""
+  let saveEndpoint = """
+import json, sys
+from pathlib import Path
+
+path = Path.home() / ".config/omalauncher/cava-visualizer/settings.json"
+path.parent.mkdir(parents=True, exist_ok=True)
+try:
+    data = json.loads(path.read_text())
+except (OSError, ValueError):
+    data = {}
+
+data["endpoint"] = sys.argv[1]
+temp = path.with_name(path.name + ".tmp")
+temp.write_text(json.dumps(data) + chr(10))
+temp.replace(path)
+"""
   let barCount = int(num(settings.bars, 12))
   let sensitivity = int(num(settings.sensitivity, 60))
   let jitteriness = int(num(settings.jitteriness, 23))
@@ -78,8 +97,9 @@ def stop(_sig, _frame):
 signal.signal(signal.SIGTERM, stop)
 signal.signal(signal.SIGINT, stop)
 
-def emit(ok, values):
-    print(json.dumps({"ok": ok, "bars": values, "scale": 3.0}, separators=(",", ":")), flush=True)
+def emit(ok, values, address=None):
+    print(json.dumps({"ok": ok, "bars": values, "scale": 3.0,
+                      "address": address}, separators=(",", ":")), flush=True)
 
 def stop_process(proc):
     if proc is None or proc.poll() is not None:
@@ -93,7 +113,7 @@ def stop_process(proc):
 
 root = Path.home() / ".config/omalauncher/cava-visualizer"
 settings_file = root / "settings.json"
-print(json.dumps({"ok": False, "bars": [], "scale": 3.0,
+print(json.dumps({"ok": False, "bars": [], "scale": 3.0, "address": None,
                   "message": "connecting to app"}, separators=(",", ":")), flush=True)
 
 while not stopping:
@@ -105,7 +125,7 @@ while not stopping:
         cfg = {}
     endpoint = str(cfg.get("endpoint") or "").strip()
     if not endpoint:
-        print(json.dumps({"ok": False, "bars": [], "scale": 3.0,
+        print(json.dumps({"ok": False, "bars": [], "scale": 3.0, "address": None,
                           "message": "set app IP:port"}, separators=(",", ":")), flush=True)
         time.sleep(1)
         continue
@@ -117,17 +137,18 @@ while not stopping:
         host = parsed.hostname or ""
         if not host or any(ch.isspace() for ch in host):
             raise ValueError
-        port = parsed.port
-        if not port or parsed.query or parsed.fragment or parsed.username or parsed.password:
+        port = parsed.port or 8080
+        if parsed.query or parsed.fragment or parsed.username or parsed.password:
             raise ValueError
         authority = f"[{host}]" if ":" in host else host
+        display_address = f"{authority}:{port}"
         path = parsed.path.rstrip("/") or "/stream"
         url = f"http://{authority}:{port}{path}"
         count = max(4, min(64, int(cfg.get("bars", 12))))
         sensitivity = max(1, min(200, int(cfg.get("sensitivity", 60))))
         jitteriness = max(0, min(100, int(cfg.get("jitteriness", 23))))
     except (ValueError, TypeError):
-        print(json.dumps({"ok": False, "bars": [], "scale": 3.0,
+        print(json.dumps({"ok": False, "bars": [], "scale": 3.0, "address": endpoint,
                           "message": "check app IP:port"}, separators=(",", ":")), flush=True)
         time.sleep(1)
         continue
@@ -213,13 +234,13 @@ while not stopping:
                         if len(buffer) > 16384:
                             buffer = b""
                     if latest is not None:
-                        emit(True, latest)
+                        emit(True, latest, display_address)
                         last_frame = last_emit = time.monotonic()
                 now = time.monotonic()
                 if now - last_frame > 2.5:
                     break
                 if now - last_emit > 1:
-                    emit(False, zero)
+                    emit(False, zero, display_address)
                     last_emit = now
         except (OSError, subprocess.SubprocessError):
             pass
@@ -234,6 +255,7 @@ while not stopping:
                 cava.stdout.close()
     if not stopping:
         print(json.dumps({"ok": False, "bars": zero, "scale": 3.0,
+                          "address": display_address,
                           "message": "start app or check URL"}, separators=(",", ":")), flush=True)
         if not changed:
             time.sleep(2)
@@ -243,6 +265,13 @@ while not stopping:
   let active = frame != null && frame.ok == true
   let scale = frame != null ? num(frame.scale, 3.0) : 3.0
   let audible = !paused && active && any(bars, v => num(v, 0) > 0.015)
+
+  when editingAddress && screenWidth > 0 { settingsScreenSeen = true }
+  when editingAddress && settingsScreenSeen && screenWidth == null {
+    run("python3 -c ${sh(saveEndpoint)} ${sh(trim(addressDraft))}")
+    editingAddress = false
+    settingsScreenSeen = false
+  }
 
   Box {
     fill: true
@@ -265,15 +294,18 @@ while not stopping:
         let msg = frame != null && frame.message != null ? str(frame.message) : "waiting for audio"
         // A narrow tile (landscape) can't fit the line at 13sp: split it in two and shrink if still needed.
         if len(msg) * 13 * 0.6 <= width - 8 {
-          text(msg, width / 2, height / 2, size: 13, align: center, color: foreground)
+          text(msg, width / 2, (height / 2 - 8), size: 13, align: center, color: foreground)
         } else {
           let ws = words(msg)
           let half = ceil(len(ws) / 2)
           let l1 = join(take(ws, half), " ")
           let l2 = join(drop(ws, half), " ")
           let fs = clamp((width - 8) / (max(len(l1), len(l2)) * 0.6), 8, 13)
-          text(l1, width / 2, height / 2 - fs * 0.65, size: fs, align: center, color: foreground)
-          text(l2, width / 2, height / 2 + fs * 0.65, size: fs, align: center, color: foreground)
+          text(l1, width / 2, (height / 2 - 8) - fs * 0.65, size: fs, align: center, color: foreground)
+          text(l2, width / 2, (height / 2 - 8) + fs * 0.65, size: fs, align: center, color: foreground)
+        }
+        if frame != null && frame.address != null && frame.address != "" {
+          text(frame.address, width / 2, height / 2 + 20, size: 10, align: center, color: muted)
         }
       }
     }
@@ -283,7 +315,16 @@ while not stopping:
       gap: 4
       justify: spaceBetween
       align: top
-      Button { text: "⚙︎"; background: surface; onTap: screen() }
+      Button {
+        text: "⚙︎"
+        background: surface
+        onTap: {
+          addressDraft = endpoint
+          editingAddress = true
+          settingsScreenSeen = false
+          screen()
+        }
+      }
       Button { text: paused ? "▶" : "Ⅱ"; background: surface; onTap: paused = !paused }
     }
 
@@ -312,11 +353,9 @@ while not stopping:
 
       Text { text: "audio server address"; style: label }
       Input {
-        text: endpoint
-        placeholder: "192.168.1.20:8080 or http://…"
-        onSubmit: {
-          run("python3 -c 'import json,sys; from pathlib import Path; p=Path.home()/\".config/omalauncher/cava-visualizer/settings.json\"; p.parent.mkdir(parents=True,exist_ok=True); d=json.loads(p.read_text()) if p.exists() else {}; d[sys.argv[1]]=sys.argv[2]; t=p.with_name(p.name+\".tmp\"); t.write_text(json.dumps(d)+chr(10)); t.replace(p)' endpoint ${sh(trim(value))}")
-        }
+        text: addressDraft
+        placeholder: "192.168.1.20 (port defaults to 8080)"
+        onChange: addressDraft = value
       }
 
       NumberSetting { key: "bars"; labelText: "bar count"; current: barCount; low: 4; high: 64 }
@@ -327,7 +366,15 @@ while not stopping:
         onTap: run("python3 -c ${sh(saveSettings)} bars 4 64 12 sensitivity 1 200 60 jitteriness 0 100 23")
       }
 
-      Button { text: "close"; onTap: close() }
+      Button {
+        text: "close"
+        onTap: {
+          run("python3 -c ${sh(saveEndpoint)} ${sh(trim(addressDraft))}")
+          editingAddress = false
+          settingsScreenSeen = false
+          close()
+        }
+      }
     }
   }
 }
