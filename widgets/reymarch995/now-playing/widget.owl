@@ -179,9 +179,9 @@ widget "now-playing-plus" {
         PlaybackIcon { playing: isPlaying }
       }
       if rightAligned {
-        ShadowText { s: appName; tint: isPlaying ? accent : muted; maxLines: 1; expand: false }
+        ShadowText { s: appName; tint: isPlaying ? accent : muted; maxLines: 1; subtle: true; expand: false }
       } else {
-        ShadowText { s: appName; tint: isPlaying ? accent : muted; maxLines: 1; weight: 1 }
+        ShadowText { s: appName; tint: isPlaying ? accent : muted; maxLines: 1; subtle: true; weight: 1 }
       }
     }
   }
