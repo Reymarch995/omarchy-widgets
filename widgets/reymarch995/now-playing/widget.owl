@@ -1,9 +1,9 @@
-widget "now-playing" {
+widget "now-playing-plus" {
   size: 6x2
   minSize: 3x2
   padding: 0
   requires { pacman: [] }
-  meta { description: "What's playing on your phone, from any music or podcast app: album art, track, progress and play, pause and skip. Tap the tile to open the app"; version: "1.5"; license: "MIT"; category: "fun"; owl: 6 }
+  meta { description: "A configurable player tile with album art, playback controls, title scrolling, app placement, and album color blending."; version: "1.5"; license: "MIT"; category: "fun"; owl: 6 }
 
   // {available, playing, title, artist, album, app, package, position, duration, art}.
   // Android only shares other apps' sessions with notification access; without it, available is false.
@@ -40,8 +40,8 @@ widget "now-playing" {
   let dur = num(m.duration, 0)
   let elapsed = isPlaying && positionAnchorAt > 0 && now != null ? max(0, now - positionAnchorAt) : 0
   let pos = dur > 0 ? clamp(positionAnchor + elapsed, 0, dur) : positionAnchor + elapsed
-  let narrow = cols != null && cols < 5
-  let tight = cols != null && cols < 6
+  let narrow = tileWidth != null && tileWidth < 290
+  let tight = tileWidth != null && tileWidth < 348
   let art = clamp((tileHeight ?? 130) - 26, 40, 132)
   // A tile taller than wide (landscape home screen, or a tall portrait tile) stacks
   // art, text and controls vertically instead of side by side.
@@ -184,6 +184,7 @@ widget "now-playing" {
         style: small
         color: isPlaying ? accent : muted
         maxLines: 1
+        width: len(appName) * 7
         onTap: media("open")
       }
     }
@@ -304,7 +305,7 @@ widget "now-playing" {
       Canvas {
         fill: true
         clip(0, 0, width, height) {
-          if titleScrollEnabled && textWidth > width {
+          if titleScrollEnabled && isPlaying && textWidth > width {
             let x = (cycle - (time * 24) % cycle) % cycle
             text(s, x, height / 2, size: size, align: start, bold: true, color: foreground)
             text(s, x - cycle, height / 2, size: size, align: start, bold: true, color: foreground)
@@ -387,7 +388,7 @@ widget "now-playing" {
           Row {
             align: center
             gap: 8
-            Text { text: m.artist ?? ""; style: small; color: muted; maxLines: 1; onTap: media("open") }
+            Text { text: m.artist ?? ""; style: small; color: muted; maxLines: 1; weight: 1; onTap: media("open") }
             InlineAppLine { }
           }
         } else if appPlacement == "farRight" {
