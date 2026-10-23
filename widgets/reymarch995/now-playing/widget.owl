@@ -1,0 +1,537 @@
+widget "now-playing" {
+  size: 6x2
+  minSize: 3x2
+  padding: 0
+  requires { pacman: [] }
+  meta { description: "What's playing on your phone, from any music or podcast app: album art, track, progress and play, pause and skip. Tap the tile to open the app"; version: "1.3"; license: "MIT"; category: "fun"; owl: 6 }
+
+  // {available, playing, title, artist, album, app, package, position, duration, art}.
+  // Android only shares other apps' sessions with notification access; without it, available is false.
+  source m = android.media
+  // Media positions arrive as snapshots. A one second clock lets the display advance between
+  // snapshots without running a frame animation, and stops advancing as soon as playback pauses.
+  source now = clock every 1s
+  state positionAnchor = 0
+  state positionAnchorAt = 0
+  on m {
+    positionAnchor = num(value.position, 0)
+    positionAnchorAt = num(now, 0)
+  }
+  when now != null && m != null {
+    positionAnchor = num(m.position, 0)
+    positionAnchorAt = now
+  }
+  state appPlacement = "top" persist
+  state settingsSide = "left" persist
+  state albumBlendEnabled = false persist
+  state blendStrength = 35 persist
+  state widgetBlendStrength = 55 persist
+  state placementPage = 0
+  state settingsSidePage = 0
+
+  let has = m != null && m.title != null
+  let allowed = m == null || m.available != false
+  let dur = num(m.duration, 0)
+  let elapsed = m.playing == true && positionAnchorAt > 0 && now != null ? max(0, now - positionAnchorAt) : 0
+  let pos = dur > 0 ? clamp(positionAnchor + elapsed, 0, dur) : positionAnchor + elapsed
+  let narrow = cols != null && cols < 5
+  let tight = cols != null && cols < 6
+  let art = clamp((tileHeight ?? 130) - 26, 40, 132)
+  // A tile taller than wide (landscape home screen, or a tall portrait tile) stacks
+  // art, text and controls vertically instead of side by side.
+  let tall = tileWidth != null && tileHeight != null && tileHeight > tileWidth * 1.3
+  let tallArt = tall ? clamp(min(tileWidth - 26, tileHeight * 0.45), 40, 240) : 0
+
+  component Clock(s) {
+    Text { text: s == null ? "" : "${floor(s / 60)}:${pad(floor(s % 60), 2, "0")}"; style: label; color: muted; font: mono; maxLines: 1; width: len("${floor(s / 60)}") * 7 + 22 }
+  }
+
+  // Drawn, not glyphs: the launcher's icon font only carries weather symbols. Paths need an
+  // explicit fill: to be filled. Play/pause is a solid disc with the glyph in the background color.
+  component Control(kind, big = false, compact = false) {
+    Box {
+      size: compact ? (big ? 34 : 28) : (big ? 38 : 32)
+      onTap: media(kind)
+      Canvas {
+        let cx = width / 2
+        let cy = height / 2
+        let d = min(width, height)
+        if kind == "toggle" {
+          circle(cx, cy, d / 2, fill: foreground)
+          if m.playing == true {
+            rect(cx - d * 0.15, cy - d * 0.18, d * 0.11, d * 0.36, radius: d * 0.03, fill: background)
+            rect(cx + d * 0.04, cy - d * 0.18, d * 0.11, d * 0.36, radius: d * 0.03, fill: background)
+          } else {
+            // The triangle's centroid sits right of its box: nudge it so it looks centered.
+            path([[cx - d * 0.12, cy - d * 0.2], [cx + d * 0.21, cy], [cx - d * 0.12, cy + d * 0.2]], closed: true, fill: background)
+          }
+        } else {
+          let dir = kind == "next" ? 1 : -1
+          path([[cx - d * 0.19 * dir, cy - d * 0.2], [cx + d * 0.1 * dir, cy], [cx - d * 0.19 * dir, cy + d * 0.2]], closed: true, fill: foreground)
+          rect(dir > 0 ? cx + d * 0.1 : cx - d * 0.18, cy - d * 0.2, d * 0.08, d * 0.4, radius: d * 0.03, fill: foreground)
+        }
+      }
+    }
+  }
+
+  component SettingsButton() {
+    Box {
+      size: 22
+      radius: 11
+      background: alpha(background, 0.72)
+      onTap: screen()
+      Canvas {
+        let cx = width / 2
+        let cy = height / 2
+        for i in range(8) {
+          rotate(i * 45, cx, cy) {
+            rect(cx - 1.2, cy - 7, 2.4, 3.5, radius: 0.7, fill: muted)
+          }
+        }
+        circle(cx, cy, 4.5, fill: muted)
+        circle(cx, cy, 1.8, fill: background)
+      }
+    }
+  }
+
+  component Art(src, d) {
+    Box {
+      size: d
+      // Rounded as much as the launcher's corner style: square on edge, 8dp on round.
+      radius: 8 * corners
+      clip: true
+      align: center
+      if src != null {
+        Image { src: src; fit: cover; fill: true; onTap: media("open") }
+      } else {
+        // Gradients only fill inside a Canvas, not as a background.
+        Canvas {
+          onTap: media("open")
+          rect(0, 0, width, height, fill: linear(0, 0, width, height, [alpha(accent, 0.55), alpha(magenta, 0.35)]))
+          text("♪", width / 2, height / 2, size: d * 0.45, align: center, color: alpha(foreground, 0.85))
+        }
+      }
+      if settingsSide == "artBottomLeft" {
+        Box {
+          fill: true
+          align: bottomStart
+          padding: 6
+          SettingsButton { }
+        }
+      }
+    }
+  }
+
+  component ShadowText(s, tint, maxLines = 1, isSmall = false) {
+    Box {
+      fill: width
+      onTap: media("open")
+      if isSmall {
+        Text { text: s; style: small; color: alpha(color0, 0.85); maxLines: maxLines; offset: [1, 1] }
+        Text { text: s; style: small; color: tint; maxLines: maxLines }
+      } else {
+        Text { text: s; style: label; color: alpha(color0, 0.85); maxLines: maxLines; offset: [1, 1] }
+        Text { text: s; style: label; color: tint; maxLines: maxLines }
+      }
+    }
+  }
+
+  component PlaybackIcon(playing) {
+    Canvas {
+      width: 14
+      height: 14
+      if playing {
+        path([[4, 1.5], [12, 7], [4, 12.5]], closed: true, fill: accent)
+      } else {
+        rect(2.5, 1.5, 3.5, 11, radius: 1, fill: muted)
+        rect(8, 1.5, 3.5, 11, radius: 1, fill: muted)
+      }
+    }
+  }
+
+  // Keep this row static; continuous animation costs battery while the tile is visible.
+  component AppLine(rightAligned = false) {
+    Row {
+      align: center
+      gap: 6
+      if rightAligned { Spacer { weight: 1 } }
+      if m.playing == true || m.playing == false {
+        PlaybackIcon { playing: m.playing == true }
+      }
+      if rightAligned {
+        ShadowText { s: lower(m.app ?? ""); tint: m.playing == true ? accent : muted; maxLines: 1 }
+      } else {
+        ShadowText { s: lower(m.app ?? ""); tint: m.playing == true ? accent : muted; maxLines: 1; weight: 1 }
+      }
+    }
+  }
+
+  component MenuOption(label, value, selected, group, page, maxPage) {
+    Column {
+      align: center
+      justify: center
+      gap: 6
+      padding: [12, 8]
+      height: 120
+      clip: true
+      fill: width
+      background: selected ? alpha(accent, 0.14) : surface
+      border: 1
+      borderColor: selected ? accent : border
+      radius: 8 * corners
+      onTap: {
+        appPlacement = group == "app" ? value : appPlacement
+        settingsSide = group == "app" ? settingsSide : value
+      }
+      onDrag: {
+        placementPage = group == "app" && abs(dx) > 20 ? clamp(page + (dx < 0 ? 1 : -1), 0, maxPage) : placementPage
+        settingsSidePage = group != "app" && abs(dx) > 20 ? clamp(page + (dx < 0 ? 1 : -1), 0, maxPage) : settingsSidePage
+      }
+      Text { text: selected ? "●" : "○"; color: selected ? accent : muted }
+      Text { text: label; style: body; maxLines: 3 }
+    }
+  }
+
+  component OptionStrip(group, options, selected) {
+    let viewport = screenWidth - 48
+    let page = group == "app" ? placementPage : settingsSidePage
+    let pageCount = ceil(count(options) / 2)
+    let maxPage = max(0, pageCount - 1)
+    let cardWidth = min(130, (viewport - 8) / 2)
+    Column {
+      gap: 5
+      Box {
+        width: viewport
+        height: 120
+        clip: true
+        Row {
+          fill: width
+          height: 120
+          gap: 8
+          onDrag: {
+            placementPage = group == "app" && abs(dx) > 20 ? clamp(page + (dx < 0 ? 1 : -1), 0, maxPage) : placementPage
+            settingsSidePage = group != "app" && abs(dx) > 20 ? clamp(page + (dx < 0 ? 1 : -1), 0, maxPage) : settingsSidePage
+          }
+          for option, i in options key option.value {
+            if floor(i / 2) == page {
+              MenuOption {
+                width: cardWidth
+                label: option.label
+                value: option.value
+                selected: selected == option.value
+                group: group
+                page: page
+                maxPage: maxPage
+              }
+            }
+          }
+        }
+      }
+      if maxPage > 0 {
+        Canvas {
+          width: viewport
+          height: 4
+          onTap: {
+            placementPage = group == "app" ? (x < viewport / 2 ? 0 : maxPage) : placementPage
+            settingsSidePage = group != "app" ? (x < viewport / 2 ? 0 : maxPage) : settingsSidePage
+          }
+          onDrag: {
+            placementPage = group == "app" && abs(dx) > 20 ? clamp(page + (dx < 0 ? 1 : -1), 0, maxPage) : placementPage
+            settingsSidePage = group != "app" && abs(dx) > 20 ? clamp(page + (dx < 0 ? 1 : -1), 0, maxPage) : settingsSidePage
+          }
+          let thumbWidth = width / pageCount
+          let thumbX = page / maxPage * (width - thumbWidth)
+          rect(0, 0, width, height, radius: 2, fill: alpha(muted, 0.3))
+          rect(thumbX, 0, thumbWidth, height, radius: 2, fill: accent)
+        }
+        Row {
+          fill: width
+          justify: end
+          Button {
+            text: page < maxPage ? "More options →" : "← First options"
+            onTap: {
+              placementPage = group == "app" ? (page < maxPage ? page + 1 : 0) : placementPage
+              settingsSidePage = group != "app" ? (page < maxPage ? page + 1 : 0) : settingsSidePage
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Keep short titles still; scroll longer ones inside a clipped row.
+  component ScrollingTitle(s) {
+    Box {
+      height: 30
+      fill: width
+      clip: true
+      onTap: media("open")
+      Canvas {
+        fill: true
+        clip(0, 0, width, height) {
+          let size = 21
+          // OWL Canvas does not expose text measurement, so estimate the rendered width.
+          let textWidth = max(len(s) * size * 0.62, size)
+          if textWidth > width {
+            let gap = 3
+            let cycle = textWidth + gap
+            let x = (cycle - (time * 24) % cycle) % cycle
+            text(s, x, height / 2, size: size, align: start, bold: true, color: foreground)
+            text(s, x - cycle, height / 2, size: size, align: start, bold: true, color: foreground)
+          } else {
+            text(s, 0, height / 2, size: size, align: start, bold: true, color: foreground)
+          }
+        }
+      }
+    }
+  }
+
+  component EmptyState(stacked) {
+    if stacked {
+      Column {
+        gap: 10
+        Art { src: null; d: tallArt }
+        Text { text: "nothing playing"; style: body; color: muted }
+        Text { text: "start music in any app"; style: small; color: muted; maxLines: 2 }
+      }
+    } else {
+      Row {
+        align: center
+        gap: 12
+        Art { src: null; d: art }
+        Column {
+          weight: 1
+          gap: 2
+          Text { text: "nothing playing"; style: body; color: muted }
+          Text { text: "start music in any app"; style: small; color: muted; maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  component TrackDetails(stacked) {
+    Column {
+      gap: 2
+      Row {
+        align: center
+        gap: 8
+        if settingsSide == "left" || (settingsSide == "artBottomLeft" && !stacked && narrow) {
+          SettingsButton { }
+        }
+        if appPlacement == "top" {
+          AppLine { weight: 1 }
+        } else if !stacked {
+          ScrollingTitle { s: m.title; weight: 1 }
+        } else {
+          Spacer { weight: 1 }
+        }
+        if settingsSide == "right" {
+          SettingsButton { }
+        }
+      }
+      if stacked {
+        Text { text: m.title; style: body; bold: true; maxLines: 3; onTap: media("open") }
+        if appPlacement == "right" {
+          Row {
+            align: center
+            gap: 8
+            ShadowText { s: m.artist ?? ""; tint: muted; maxLines: 2; isSmall: true; weight: 1 }
+            AppLine { }
+          }
+        } else if appPlacement == "farRight" {
+          Row {
+            align: center
+            gap: 8
+            ShadowText { s: m.artist ?? ""; tint: muted; maxLines: 2; isSmall: true; weight: 2 }
+            AppLine { rightAligned: true; weight: 1 }
+          }
+        } else {
+          ShadowText { s: m.artist ?? ""; tint: muted; maxLines: 2; isSmall: true }
+        }
+        Text { text: m.album ?? ""; style: small; color: muted; maxLines: 1; onTap: media("open") }
+      } else {
+        if appPlacement == "top" {
+          ScrollingTitle { s: m.title }
+        }
+        if appPlacement == "right" {
+          Row {
+            align: center
+            gap: 8
+            ShadowText { s: m.artist ?? ""; tint: muted; maxLines: 1; isSmall: true }
+            AppLine { weight: 1 }
+          }
+        } else if appPlacement == "farRight" {
+          Row {
+            align: center
+            gap: 8
+            ShadowText { s: m.artist ?? ""; tint: muted; maxLines: 1; isSmall: true; weight: 2 }
+            AppLine { rightAligned: true; weight: 1 }
+          }
+        } else {
+          ShadowText { s: m.artist ?? ""; tint: muted; maxLines: 1; isSmall: true }
+        }
+      }
+    }
+  }
+
+  component ProgressBar() {
+    if dur > 0 {
+      Progress { value: pos; max: dur; color: accent; track: alpha(muted, 0.2) }
+    }
+  }
+
+  component TimeLabels(separator = false, spread = false) {
+    Row {
+      align: center
+      gap: 4
+      Clock { s: pos }
+      if separator {
+        Text { text: "/"; style: label; color: alpha(muted, 0.5); width: 8 }
+      }
+      if spread { Spacer { weight: 1 } }
+      Clock { s: dur }
+    }
+  }
+
+  component PlayerControls(showTime = false, centered = false, compact = false, tight = false) {
+    Row {
+      align: center
+      gap: tight ? 2 : 4
+      if showTime && !tight && dur > 0 {
+        TimeLabels { separator: true }
+      }
+      Spacer { weight: 1 }
+      Control { kind: "previous"; compact: compact }
+      Control { kind: "toggle"; big: true; compact: compact }
+      Control { kind: "next"; compact: compact }
+      if centered { Spacer { weight: 1 } }
+    }
+  }
+
+  Box {
+    fill: true
+    if albumBlendEnabled && m.art != null {
+      Image { src: m.art; fit: cover; fill: true; opacity: blendStrength / 100 }
+      Canvas {
+        fill: true
+        let widgetBlend = widgetBlendStrength / 100
+        rect(0, 0, width, height, fill: linear(0, 0, width, 0, [alpha(background, min(1, widgetBlend * 0.4)), alpha(background, min(1, widgetBlend * 0.7)), alpha(background, min(1, widgetBlend))]))
+      }
+    }
+    Box {
+      fill: true
+      padding: 12
+      if !allowed {
+        Column {
+          justify: center
+          gap: 6
+          Text { text: "now playing"; style: muted }
+          Text { text: "Allow notification access so the launcher can see what's playing. Tap to open the setting."; style: small; maxLines: 3; onTap: media("open") }
+        }
+      } else {
+        if !has {
+          EmptyState { stacked: tall }
+        } else {
+          if tall {
+            Column {
+              gap: 8
+              Art { src: m.art; d: tallArt }
+              TrackDetails { stacked: true }
+              Spacer { weight: 1 }
+              ProgressBar { }
+              if dur > 0 { TimeLabels { spread: true } }
+              PlayerControls { centered: true }
+            }
+          } else {
+            Row {
+              align: center
+              gap: 12
+              if !narrow {
+                Art { src: m.art; d: art }
+              }
+              Column {
+                weight: 1
+                gap: 2
+                TrackDetails { stacked: false }
+                Spacer { weight: 1 }
+                ProgressBar { }
+                if tight && dur > 0 {
+                  TimeLabels { spread: true }
+                }
+                PlayerControls { showTime: true; compact: narrow; centered: tight; tight: tight }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "Now Playing Settings"
+    Column {
+      scroll: true
+      gap: 18
+      padding: 24
+      Column {
+        gap: 6
+        Text { text: "App indicator"; style: body; bold: true }
+        Text { text: "Choose where the current player name appears."; style: small; color: muted }
+      }
+      OptionStrip {
+        group: "app"
+        selected: appPlacement
+        options: [
+          {label: "Above artist", value: "top"},
+          {label: "Right of artist", value: "right"},
+          {label: "At right edge", value: "farRight"},
+          {label: "Hidden", value: "hidden"}
+        ]
+      }
+      Column {
+        gap: 6
+        Text { text: "Settings button position"; style: body; bold: true }
+        Text { text: "Choose where the gear sits relative to the player."; style: small; color: muted }
+      }
+      OptionStrip {
+        group: "settings"
+        selected: settingsSide
+        options: [
+          {label: "Left of app indicator", value: "left"},
+          {label: "Right of app indicator", value: "right"},
+          {label: "Bottom left of album art", value: "artBottomLeft"}
+        ]
+      }
+      Column {
+        gap: 6
+        Text { text: "Album color blend"; style: body; bold: true }
+        Text { text: "Fade album art colors into the widget background from left to right."; style: small; color: muted }
+        Button {
+          text: albumBlendEnabled ? "Enabled" : "Disabled"
+          onTap: albumBlendEnabled = !albumBlendEnabled
+        }
+        Text { text: "Album art visibility: ${blendStrength}%"; style: small; color: muted }
+        Slider {
+          value: blendStrength
+          min: 0
+          max: 100
+          step: 5
+          color: accent
+          track: alpha(muted, 0.2)
+          onChange: blendStrength = value
+        }
+        Text { text: "Widget background blend: ${widgetBlendStrength}%"; style: small; color: muted }
+        Slider {
+          value: widgetBlendStrength
+          min: 0
+          max: 200
+          step: 5
+          color: accent
+          track: alpha(muted, 0.2)
+          onChange: widgetBlendStrength = value
+        }
+      }
+      Button { text: "Done"; onTap: close() }
+    }
+  }
+}
