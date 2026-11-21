@@ -1,6 +1,6 @@
 # Claude limits
 
-Adapted by Reymarch995 from [ssalentin/claude-limits](https://github.com/SimonSchubert/omarchy-widgets/tree/main/widgets/ssalentin/claude-limits). The original widget is distributed under the following MIT license.
+Adapted by Reymarch995 from their own Codex widget and from [ssalentin/claude-limits](https://github.com/SimonSchubert/omarchy-widgets/tree/main/widgets/ssalentin/claude-limits). The original widget is distributed under the following MIT license.
 
 MIT License
 
