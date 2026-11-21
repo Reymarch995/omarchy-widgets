@@ -1,0 +1,82 @@
+widget "claude limits" {
+  size: 6x3
+  minSize: 3x2
+  meta { owl: 4; description: "Claude Code usage limits: 5-hour session and weekly limits, with reset times. Uses Claude Code's login on this device"; version: "1.5"; license: "MIT"; category: "dev" }
+  requires { pacman: ["bash", "jq", "curl", "coreutils", "grep", "sed"] }
+  source now = clock every 30s
+  source u = cmd("""
+    d=$(date +%s)
+    mkdir -p ~/.cache
+    c=~/.cache/claude-limits.json
+    fail() { [ -s "$c" ] && jq -c --arg e "$1" '. + {error: $e}' "$c" || echo "{\"error\":\"$1\",\"updated\":$d}"; }
+    b=$(cat ~/.cache/claude-limits.backoff 2>/dev/null || echo 0)
+    [ "$d" -lt "$b" ] && { fail "rate limited, retry in $(( (b - d + 59) / 60 ))m"; exit 0; }
+    t=$(jq -r '.claudeAiOauth.accessToken // empty' ~/.claude/.credentials.json 2>/dev/null)
+    [ -n "$t" ] || { fail "not logged in"; exit 0; }
+    r=$(printf 'Authorization: Bearer %s\n' "$t" |
+      curl -s -m 15 -D ~/.cache/claude-limits.hdr -w '\n%{http_code}' -H @- -H 'anthropic-beta: oauth-2025-04-20' https://api.anthropic.com/api/oauth/usage)
+    ra=$(grep -i '^retry-after:' ~/.cache/claude-limits.hdr 2>/dev/null | tr -dc 0-9)
+    l=~/.cache/claude-limits.log
+    echo "$d $(printf %s "$r" | tail -n 1) $ra" >> "$l"
+    [ "$(wc -l < "$l")" -gt 200 ] && sed -i 1,100d "$l"
+    case $(printf %s "$r" | tail -n 1) in
+      200) o=$(printf %s "$r" | sed '$d' |
+        jq -c --argjson d "$d" '
+          def ts: if . then sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601 else null end;
+          {updated: $d, limits: ([.limits[] | {
+            label: (if .kind == "session" then "5h session" elif .kind == "weekly_all" then "week" else "week \(.scope.model.display_name // "")" end),
+            short: (if .kind == "session" then "5h" elif .kind == "weekly_all" then "wk" else (.scope.model.display_name // "wk") end),
+            pct: .percent,
+            resets: (.resets_at | ts)}])}') &&
+        { printf '%s\n' "$o" > "$c"; printf '%s\n' "$o"; } || fail "usage unavailable" ;;
+      401) fail "login expired: open Claude Code" ;;
+      429) echo $(( d + ${ra:-300} )) > ~/.cache/claude-limits.backoff
+        fail "rate limited, retry in $(( (${ra:-300} + 59) / 60 ))m" ;;
+      *) fail "usage unavailable" ;;
+    esac
+  """) every 5m json timeout 30s
+  asset claudeLogo = base64"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"
+  let limits = (u.limits ?? []).map(l => {label: l.label, short: l.short, pct: l.resets != null && l.resets <= now ? 0 : l.pct, resets: l.resets})
+  let five = limits.find(l => l.short == "5h")
+  let week = limits.find(l => l.short == "wk")
+  let compact = cols == null || cols < 3 || rows == null || rows < 3
+  let fiveReset = five.resets == null ? null : five.resets <= now ? "full" : fmtTime(five.resets, compact ? "HH:mm" : "EEE, MMM d · HH:mm")
+  let weekReset = week.resets == null ? null : week.resets <= now ? "full" : fmtTime(week.resets, compact ? "MMM d HH:mm" : "EEE, MMM d · HH:mm")
+  component Limit(label, used, reset, mark = false, compact = false) {
+    Column {
+      gap: compact ? 1 : 2
+      Row {
+        gap: 0
+        align: center
+        if mark {
+          Image { src: claudeLogo; width: compact ? 22 : 26; height: compact ? 22 : 26 }
+        }
+        Text { text: label; fontSize: compact ? 15 : 18; font: mono; color: foreground; width: compact ? 64 : 100; bold: true }
+        Text { text: used == null ? "—" : "${round(100 - used)}%"; fontSize: compact ? 14 : 16; color: foreground; align: end; weight: 1 }
+      }
+      Progress {
+        value: used == null ? 0 : 100 - used
+        color: accent
+        track: alpha(muted, 0.22)
+        height: compact ? 4 : 7
+        fill: width
+        animate value: spring()
+      }
+      Text {
+        text: reset == null ? "waiting for Claude data" : reset == "full" ? "full" : "resets ${reset}"
+        style: small
+        color: foreground
+        maxLines: 1
+      }
+    }
+  }
+  onTap: refresh()
+  Column {
+    gap: compact ? 5 : 10
+    Limit { label: "5h"; used: five.pct; reset: fiveReset; mark: true; compact: compact }
+    Limit { label: "1week"; used: week.pct; reset: weekReset; compact: compact }
+    if u.error != null {
+      Text { text: u.error; color: red; fontSize: 10; maxLines: 1 }
+    }
+  }
+}
